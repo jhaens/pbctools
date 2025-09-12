@@ -1,0 +1,65 @@
+[build-system]
+requires = ["pybind11>=2.10.0", "setuptools>=45", "wheel", "numpy"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pbctools"
+version = "0.1.0"
+description = "Lightweight PBC analysis toolkit for molecular simulations"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Jonas Hänseroth", email = "jonas.haenseroth@tu-ilmenau.de"}
+]
+keywords = ["molecular dynamics", "PBC", "periodic boundary conditions", "trajectory analysis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "black",
+    "flake8",
+    "mypy",
+]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+]
+
+[project.urls]
+Homepage = "https://github.com/jhaens/pbctools"
+Repository = "https://github.com/jhaens/pbctools.git"
+"Bug Tracker" = "https://github.com/jhaens/pbctools/issues"
+
+[tool.setuptools]
+packages = ["pbctools"]
+
+[tool.setuptools.package-data]
+pbctools = ["*.so", "*.pyd"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
