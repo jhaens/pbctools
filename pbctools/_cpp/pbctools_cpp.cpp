@@ -12,7 +12,6 @@
 
 #ifdef WITH_OPENMP
 #include <omp.h>
-omp_set_num_threads(4);
 #endif
 
 namespace pbctools {
@@ -147,6 +146,7 @@ std::vector<std::vector<std::vector<Coordinate>>> pbc_dist(
     std::vector<std::vector<std::vector<Coordinate>>> result(n_frames);
     
 #ifdef WITH_OPENMP
+    omp_set_num_threads(4);
     #pragma omp parallel for
 #endif
     for (size_t frame = 0; frame < n_frames; ++frame) {
@@ -171,6 +171,7 @@ std::pair<std::vector<std::vector<int>>,
     std::vector<std::vector<float>> distances(n_frames);
     
 #ifdef WITH_OPENMP
+    omp_set_num_threads(4);
     #pragma omp parallel for
 #endif
     for (size_t frame = 0; frame < n_frames; ++frame) {
