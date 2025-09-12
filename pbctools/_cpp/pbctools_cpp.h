@@ -6,6 +6,9 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <pybind11/numpy.h>
+
+namespace py = pybind11;
 
 namespace pbctools {
 
@@ -15,40 +18,21 @@ using Frame = std::vector<Coordinate>;
 using Trajectory = std::vector<Frame>;
 using PBCMatrix = std::vector<std::vector<float>>;
 
-// Core PBC distance calculation for multiple frames
-// Input: coord1 [n_frames][n_atoms1][3], coord2 [n_frames][n_atoms2][3], pbc [3][3]
-// Output: distance_vectors [n_frames][n_atoms1][n_atoms2][3]
-std::vector<std::vector<std::vector<Coordinate>>> pbc_dist(
-    const Trajectory& coord1, 
-    const Trajectory& coord2, 
-    const PBCMatrix& pbc
-);
+// Optimized interfaces using pybind11 numpy arrays (C-contiguous float32 expected)
+py::array_t<float> pbc_dist(
+    py::array_t<float, py::array::c_style | py::array::forcecast> coord1,
+    py::array_t<float, py::array::c_style | py::array::forcecast> coord2,
+    py::array_t<float, py::array::c_style | py::array::forcecast> pbc);
 
-// Single frame PBC distance calculation (helper function)
-std::vector<std::vector<Coordinate>> pbc_dist_frame(
-    const Frame& coord1, 
-    const Frame& coord2, 
-    const PBCMatrix& pbc
-);
+std::pair<py::array_t<int>, py::array_t<float>> next_neighbor(
+    py::array_t<float, py::array::c_style | py::array::forcecast> coord1,
+    py::array_t<float, py::array::c_style | py::array::forcecast> coord2,
+    py::array_t<float, py::array::c_style | py::array::forcecast> pbc);
 
-// Multi-frame nearest neighbor detection
-// Input: coord1 [n_frames][n_atoms1][3], coord2 [n_frames][n_atoms2][3], pbc [3][3]
-// Output: indices [n_frames][n_atoms1], distances [n_frames][n_atoms1]
-std::pair<std::vector<std::vector<int>>, 
-          std::vector<std::vector<float>>> next_neighbor(
-    const Trajectory& coord1,
-    const Trajectory& coord2,
-    const PBCMatrix& pbc
-);
-
-// Molecule recognition for single frame
-// Input: coords [n_atoms][3], atom_names [n_atoms], pbc [3][3]
-// Output: molecular formula counts
-std::unordered_map<std::string, int> molecule_recognition(
-    const Frame& coords,
-    const std::vector<std::string>& atoms,
-    const PBCMatrix& pbc
-);
+py::dict molecule_recognition(
+    py::array_t<float, py::array::c_style | py::array::forcecast> coords,
+    py::list atoms,
+    py::array_t<float, py::array::c_style | py::array::forcecast> pbc);
 
 // Utility functions
 bool is_orthogonal(const PBCMatrix& pbc);

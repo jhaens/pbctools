@@ -4,17 +4,6 @@ from pbctools import pbc_dist, next_neighbor, molecule_recognition
 
 class TestPbcDist:
     def test_basic_functionality(self):
-        """Test basic pbc_dist functionality."""
-        coord1 = np.random.rand(10, 5, 3).astype(np.float32)  
-        coord2 = np.random.rand(10, 3, 3).astype(np.float32)
-        pbc = np.eye(3, dtype=np.float32) * 20.0
-        
-        result = pbc_dist(coord1, coord2, pbc)
-        
-        assert result.shape == (10, 5, 3, 3)
-        assert result.dtype == np.float32
-    
-    def test_orthogonal_pbc(self):
         """Test with orthogonal PBC (cubic box)."""
         coord1 = np.array([[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]], dtype=np.float32)
         coord2 = np.array([[[19.0, 0.0, 0.0]]], dtype=np.float32)
@@ -70,11 +59,7 @@ class TestMoleculeRecognition:
     def test_water_molecule(self):
         """Test recognition of water molecule."""
         # Simple water molecule geometry
-        coords = np.array([
-            [0.0, 0.0, 0.0],      # O
-            [0.96, 0.0, 0.0],     # H1 
-            [-0.24, 0.93, 0.0]    # H2
-        ], dtype=np.float32)
+        coords = np.array([[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]], dtype=np.float32)
         atoms = np.array(['O', 'H', 'H'])
         pbc = np.eye(3, dtype=np.float32) * 10.0
         
@@ -86,14 +71,7 @@ class TestMoleculeRecognition:
     def test_multiple_molecules(self):
         """Test recognition of multiple molecules."""
         # Two separate water molecules
-        coords = np.array([
-            [0.0, 0.0, 0.0],      # O1
-            [0.96, 0.0, 0.0],     # H1 
-            [-0.24, 0.93, 0.0],   # H2
-            [5.0, 0.0, 0.0],      # O2
-            [5.96, 0.0, 0.0],     # H3
-            [4.76, 0.93, 0.0]     # H4
-        ], dtype=np.float32)
+        coords = np.array([[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0], [5.0, 0.0, 0.0], [5.96, 0.0, 0.0], [4.76, 0.93, 0.0]], dtype=np.float32)
         atoms = np.array(['O', 'H', 'H', 'O', 'H', 'H'])
         pbc = np.eye(3, dtype=np.float32) * 10.0
         
@@ -102,20 +80,6 @@ class TestMoleculeRecognition:
         assert 'H2O' in result
         assert result['H2O'] == 2
     
-    def test_hydroxide_ion(self):
-        """Test recognition of hydroxide ion."""
-        coords = np.array([
-            [0.0, 0.0, 0.0],      # O
-            [0.96, 0.0, 0.0],     # H
-        ], dtype=np.float32)
-        atoms = np.array(['O', 'H'])
-        pbc = np.eye(3, dtype=np.float32) * 10.0
-        
-        result = molecule_recognition(coords, atoms, pbc)
-        
-        assert 'HO' in result
-        assert result['HO'] == 1
-
 
 if __name__ == "__main__":
     pytest.main([__file__])

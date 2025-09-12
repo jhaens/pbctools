@@ -9,6 +9,7 @@
 #include <queue>
 #include <unordered_set>
 #include <optional>
+#include <pybind11/pybind11.h>
 
 #ifdef WITH_OPENMP
 #include <omp.h>
@@ -16,201 +17,133 @@
 
 namespace pbctools {
 
-//#######################
-//## MATRIX OPERATIONS ##
-//#######################
+//##############
+//## PBC_DIST ##
+//##############
 
-float matrix_determinant(const PBCMatrix& matrix) {
-    return matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) -
-           matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0]) +
-           matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
+
+// Helper: compute inverse of a 3x3 (column-major via pointer)
+static inline void invert_3x3(const float* m, float* inv) {
+    float det = m[0]*(m[4]*m[8]-m[5]*m[7]) - m[1]*(m[3]*m[8]-m[5]*m[6]) + m[2]*(m[3]*m[7]-m[4]*m[6]);
+    if (std::fabs(det) < 1e-12f) throw std::runtime_error("Singular PBC matrix");
+    float id = 1.0f/det;
+    inv[0] =  (m[4]*m[8]-m[5]*m[7]) * id;
+    inv[1] = -(m[1]*m[8]-m[2]*m[7]) * id;
+    inv[2] =  (m[1]*m[5]-m[2]*m[4]) * id;
+    inv[3] = -(m[3]*m[8]-m[5]*m[6]) * id;
+    inv[4] =  (m[0]*m[8]-m[2]*m[6]) * id;
+    inv[5] = -(m[0]*m[5]-m[2]*m[3]) * id;
+    inv[6] =  (m[3]*m[7]-m[4]*m[6]) * id;
+    inv[7] = -(m[0]*m[7]-m[1]*m[6]) * id;
+    inv[8] =  (m[0]*m[4]-m[1]*m[3]) * id;
 }
 
-PBCMatrix matrix_inverse(const PBCMatrix& matrix) {
-    float det = matrix_determinant(matrix);
-    if (std::abs(det) < 1e-10f) {
-        throw std::runtime_error("Matrix is singular and cannot be inverted.");
-    }
-    
-    PBCMatrix inverse(3, std::vector<float>(3, 0.0f));
-    inverse[0][0] = (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) / det;
-    inverse[0][1] = (matrix[0][2] * matrix[2][1] - matrix[0][1] * matrix[2][2]) / det;
-    inverse[0][2] = (matrix[0][1] * matrix[1][2] - matrix[0][2] * matrix[1][1]) / det;
-    inverse[1][0] = (matrix[1][2] * matrix[2][0] - matrix[1][0] * matrix[2][2]) / det;
-    inverse[1][1] = (matrix[0][0] * matrix[2][2] - matrix[0][2] * matrix[2][0]) / det;
-    inverse[1][2] = (matrix[0][2] * matrix[1][0] - matrix[0][0] * matrix[1][2]) / det;
-    inverse[2][0] = (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]) / det;
-    inverse[2][1] = (matrix[0][1] * matrix[2][0] - matrix[0][0] * matrix[2][1]) / det;
-    inverse[2][2] = (matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]) / det;
-    return inverse;
-}
+pybind11::array_t<float> pbc_dist(
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> coord1,
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> coord2,
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> pbc) {
 
-std::vector<float> matrix_vector_multiply(const PBCMatrix& matrix, const Coordinate& vec) {
-    std::vector<float> result(3, 0.0f);
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            result[i] += matrix[i][j] * vec[j];
-        }
-    }
-    return result;
-}
+    auto b1 = coord1.request();
+    auto b2 = coord2.request();
+    auto bp = pbc.request();
+    if (b1.ndim != 3 || b1.shape[2] != 3) throw std::runtime_error("coord1 must have shape (F,A1,3)");
+    if (b2.ndim != 3 || b2.shape[2] != 3) throw std::runtime_error("coord2 must have shape (F,A2,3)");
+    if (bp.ndim != 2 || bp.shape[0] != 3 || bp.shape[1] != 3) throw std::runtime_error("pbc must be (3,3)");
+    if (b1.shape[0] != b2.shape[0]) throw std::runtime_error("coord1/coord2 frames mismatch");
 
-std::vector<float> vector_matrix_multiply(const Coordinate& vec, const PBCMatrix& matrix) {
-    std::vector<float> result(3, 0.0f);
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            result[i] += vec[j] * matrix[j][i];
-        }
-    }
-    return result;
-}
+    const float* pbc_ptr = static_cast<float*>(bp.ptr);
+    bool ortho = std::fabs(pbc_ptr[1]) < 1e-7f && std::fabs(pbc_ptr[2]) < 1e-7f &&
+                 std::fabs(pbc_ptr[3]) < 1e-7f && std::fabs(pbc_ptr[5]) < 1e-7f &&
+                 std::fabs(pbc_ptr[6]) < 1e-7f && std::fabs(pbc_ptr[7]) < 1e-7f;
 
-bool is_orthogonal(const PBCMatrix& pbc) {
-    const float tolerance = 1e-6f;
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            if (i != j && std::abs(pbc[i][j]) > tolerance) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
+    ssize_t F = b1.shape[0];
+    ssize_t A1 = b1.shape[1];
+    ssize_t A2 = b2.shape[1];
+    auto out = pybind11::array_t<float>({F, A1, A2, (ssize_t)3});
+    auto bo = out.request();
+    float* dst = static_cast<float*>(bo.ptr);
+    const float* c1 = static_cast<float*>(b1.ptr);
+    const float* c2 = static_cast<float*>(b2.ptr);
 
-//#######################
-//## PBC DIST FUNCTION ##
-//#######################
+    float inv[9];
+    if (!ortho) invert_3x3(pbc_ptr, inv);
 
-std::vector<std::vector<Coordinate>> pbc_dist_frame(
-    const Frame& coord1, 
-    const Frame& coord2, 
-    const PBCMatrix& pbc) {
-    
-    bool is_ortho_pbc = is_orthogonal(pbc);
-    std::vector<std::vector<Coordinate>> distance_vectors(
-        coord1.size(), 
-        std::vector<Coordinate>(coord2.size(), Coordinate(3, 0.0f))
-    );
-    
-    if (is_ortho_pbc) {
-        // Orthogonal PBC calculation
-        for (size_t i = 0; i < coord1.size(); ++i) {
-            for (size_t j = 0; j < coord2.size(); ++j) {
-                Coordinate dist_vec(3);
-                for (int dim = 0; dim < 3; ++dim) {
-                    dist_vec[dim] = coord1[i][dim] - coord2[j][dim];
-                    // Apply PBC
-                    dist_vec[dim] = dist_vec[dim] - pbc[dim][dim] * 
-                                   std::round(dist_vec[dim] / pbc[dim][dim]);
-                }
-                distance_vectors[i][j] = dist_vec;
-            }
-        }
-    } else {
-        // Non-orthogonal PBC calculation
-        PBCMatrix inv_pbc = matrix_inverse(pbc);
-        
-        // Transform coordinates to fractional
-        std::vector<Coordinate> frac_coord1(coord1.size());
-        std::vector<Coordinate> frac_coord2(coord2.size());
-        
-        for (size_t i = 0; i < coord1.size(); ++i) {
-            frac_coord1[i] = vector_matrix_multiply(coord1[i], inv_pbc);
-        }
-        for (size_t i = 0; i < coord2.size(); ++i) {
-            frac_coord2[i] = vector_matrix_multiply(coord2[i], inv_pbc);
-        }
-        
-        for (size_t i = 0; i < coord1.size(); ++i) {
-            for (size_t j = 0; j < coord2.size(); ++j) {
-                Coordinate frac_diff(3);
-                for (int dim = 0; dim < 3; ++dim) {
-                    frac_diff[dim] = frac_coord1[i][dim] - frac_coord2[j][dim];
-                    frac_diff[dim] = frac_diff[dim] - std::round(frac_diff[dim]);
-                }
-                // Transform back to real coordinates
-                distance_vectors[i][j] = matrix_vector_multiply(pbc, frac_diff);
-            }
-        }
-    }
-    
-    return distance_vectors;
-}
-
-std::vector<std::vector<std::vector<Coordinate>>> pbc_dist(
-    const Trajectory& coord1, 
-    const Trajectory& coord2, 
-    const PBCMatrix& pbc) {
-    
-    size_t n_frames = coord1.size();
-    std::vector<std::vector<std::vector<Coordinate>>> result(n_frames);
-    
-#ifdef WITH_OPENMP
+    #ifdef WITH_OPENMP
     omp_set_num_threads(4);
-    #pragma omp parallel for
-#endif
-    for (size_t frame = 0; frame < n_frames; ++frame) {
-        result[frame] = pbc_dist_frame(coord1[frame], coord2[frame], pbc);
-    }
-    
-    return result;
-}
-
-//############################
-//## NEXT NEIGHBOR FUNCTION ##
-//############################
-
-std::pair<std::vector<std::vector<int>>, 
-          std::vector<std::vector<float>>> next_neighbor(
-    const Trajectory& coord1,
-    const Trajectory& coord2,
-    const PBCMatrix& pbc) {
-    
-    size_t n_frames = coord1.size();
-    std::vector<std::vector<int>> indices(n_frames);
-    std::vector<std::vector<float>> distances(n_frames);
-    
-#ifdef WITH_OPENMP
-    omp_set_num_threads(4);
-    #pragma omp parallel for
-#endif
-    for (size_t frame = 0; frame < n_frames; ++frame) {
-        auto dist_vectors = pbc_dist_frame(coord1[frame], coord2[frame], pbc);
-        
-        indices[frame].resize(coord1[frame].size());
-        distances[frame].resize(coord1[frame].size());
-        
-        for (size_t i = 0; i < coord1[frame].size(); ++i) {
-            float min_dist = std::numeric_limits<float>::max();
-            int min_idx = -1;
-            
-            for (size_t j = 0; j < coord2[frame].size(); ++j) {
-                // Calculate distance magnitude
-                float dist = 0.0f;
-                for (int k = 0; k < 3; ++k) {
-                    dist += dist_vectors[i][j][k] * dist_vectors[i][j][k];
-                }
-                dist = std::sqrt(dist);
-                
-                if (dist < min_dist) {
-                    min_dist = dist;
-                    min_idx = static_cast<int>(j);
+    #pragma omp parallel for schedule(static)
+    #endif
+    for (ssize_t f=0; f<F; ++f) {
+        const float* frame1 = c1 + f*A1*3;
+        const float* frame2 = c2 + f*A2*3;
+        float* frame_out = dst + f*A1*A2*3;
+        for (ssize_t i=0;i<A1;++i) {
+            const float* a1 = frame1 + i*3;
+            for (ssize_t j=0;j<A2;++j) {
+                const float* a2 = frame2 + j*3;
+                float* v = frame_out + (i*A2 + j)*3;
+                if (ortho) {
+                    for (int d=0; d<3; ++d) {
+                        float val = a1[d] - a2[d]; // orientation coord1 - coord2
+                        float L = pbc_ptr[d*3 + d];
+                        val -= L * std::round(val / L);
+                        v[d] = val;
+                    }
+                } else {
+                    float dx = a1[0]-a2[0];
+                    float dy = a1[1]-a2[1];
+                    float dz = a1[2]-a2[2];
+                    float fx = dx*inv[0] + dy*inv[3] + dz*inv[6];
+                    float fy = dx*inv[1] + dy*inv[4] + dz*inv[7];
+                    float fz = dx*inv[2] + dy*inv[5] + dz*inv[8];
+                    fx -= std::round(fx); fy -= std::round(fy); fz -= std::round(fz);
+                    v[0] = pbc_ptr[0]*fx + pbc_ptr[1]*fy + pbc_ptr[2]*fz;
+                    v[1] = pbc_ptr[3]*fx + pbc_ptr[4]*fy + pbc_ptr[5]*fz;
+                    v[2] = pbc_ptr[6]*fx + pbc_ptr[7]*fy + pbc_ptr[8]*fz;
                 }
             }
-            
-            indices[frame][i] = min_idx;
-            distances[frame][i] = min_dist;
         }
     }
-    
-    return std::make_pair(indices, distances);
+    return out;
 }
 
-//###################################
-//## MOLECULE RECOGNITION FUNCTION ##
-//###################################
+//###################
+//## NEXT_NEIGHBOR ##
+//###################
 
-// Van der Waals radius lookup
+std::pair<pybind11::array_t<int>, pybind11::array_t<float>> next_neighbor(
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> coord1,
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> coord2,
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> pbc) {
+    auto dv = pbc_dist(coord1, coord2, pbc);
+    auto bd = dv.request();
+    ssize_t F = bd.shape[0];
+    ssize_t A1 = bd.shape[1];
+    ssize_t A2 = bd.shape[2];
+    const float* vec = static_cast<float*>(bd.ptr);
+    pybind11::array_t<int> indices({F, A1});
+    pybind11::array_t<float> distances({F, A1});
+    int* ip = static_cast<int*>(indices.request().ptr);
+    float* dp = static_cast<float*>(distances.request().ptr);
+    for (ssize_t f=0; f<F; ++f) {
+        for (ssize_t i=0;i<A1;++i) {
+            float best = std::numeric_limits<float>::max();
+            int bestj = -1;
+            for (ssize_t j=0;j<A2;++j) {
+                const float* v = vec + (((f*A1)+i)*A2 + j)*3;
+                float d = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+                if (d < best) { best = d; bestj = (int)j; }
+            }
+            ip[f*A1 + i] = bestj;
+            dp[f*A1 + i] = std::sqrt(best);
+        }
+    }
+    return {indices, distances};
+}
+
+//##########################
+//## MOLECULE RECOGNITION ##
+//##########################
+
 float get_vdw_radius(const std::string& element) {
     static const std::unordered_map<std::string, float> vdw_radii = {
         {"H", 1.20f}, {"He", 1.40f}, {"Li", 1.82f}, {"Be", 1.53f}, {"B", 1.92f},
@@ -234,144 +167,55 @@ float get_vdw_radius(const std::string& element) {
     return 2.0f; // Default radius for unknown elements
 }
 
-std::unordered_map<std::string, int> molecule_recognition(
-    const Frame& coords,
-    const std::vector<std::string>& atoms,
-    const PBCMatrix& pbc) {
-    
-    size_t num_atoms = atoms.size();
-    std::vector<std::vector<size_t>> bond_graph(num_atoms);
-    
-    // Calculate distance matrix for bond detection
-    auto dist_vectors = pbc_dist_frame(coords, coords, pbc);
-    
-    // Find maximum radius for cutoff
+
+pybind11::dict molecule_recognition(
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> coords,
+    pybind11::list atoms,
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> pbc) {
+    auto bc = coords.request();
+    if (bc.ndim != 2 || bc.shape[1] != 3) throw std::runtime_error("coords must be (N,3)");
+    size_t N = bc.shape[0];
+    if ((size_t)atoms.size() != N) throw std::runtime_error("atoms length mismatch");
+    // Expand to frames=1 for reuse
+    auto coords_exp = pybind11::array_t<float>({(ssize_t)1, (ssize_t)N, (ssize_t)3});
+    std::memcpy(coords_exp.mutable_data(), bc.ptr, N*3*sizeof(float));
+    auto dv = pbc_dist(coords_exp, coords_exp, pbc); // shape (1,N,N,3)
+    const float* vecs = static_cast<float*>(dv.request().ptr);
+
+    // Build simple bond graph
+    std::vector<std::string> atom_vec; atom_vec.reserve(N);
+    for (auto a : atoms) atom_vec.push_back(a.cast<std::string>());
+    std::vector<std::vector<size_t>> bonds(N);
     float cutoff = 0.833f;
-    for (size_t i = 0; i < num_atoms; ++i) {
-        cutoff = std::max(cutoff, get_vdw_radius(atoms[i]));
-    }
+    for (auto &s: atom_vec) cutoff = std::max(cutoff, get_vdw_radius(s));
     cutoff *= 1.2f;
-    
-    // Detect bonds
-    for (size_t i = 0; i < num_atoms; ++i) {
-        float i_radius = get_vdw_radius(atoms[i]);
-        
-        for (size_t j = i + 1; j < num_atoms; ++j) {
-            float j_radius = get_vdw_radius(atoms[j]);
-            
-            // Calculate distance magnitude
-            float dist = 0.0f;
-            for (int k = 0; k < 3; ++k) {
-                dist += dist_vectors[i][j][k] * dist_vectors[i][j][k];
-            }
-            dist = std::sqrt(dist);
-            
-            float radii_sum = i_radius + j_radius;
-            
-            // VMD bond criteria
-            if (0.03f < dist && dist < 0.6f * radii_sum && dist < cutoff) {
-                bond_graph[i].push_back(j);
-                bond_graph[j].push_back(i);
-            }
+    for (size_t i=0;i<N;++i) {
+        float ri = get_vdw_radius(atom_vec[i]);
+        for (size_t j=i+1;j<N;++j) {
+            float rj = get_vdw_radius(atom_vec[j]);
+            const float* v = vecs + ((i*N + j)*3);
+            float d = std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+            float sumr = ri + rj;
+            if (0.03f < d && d < 0.6f*sumr && d < cutoff) { bonds[i].push_back(j); bonds[j].push_back(i); }
         }
     }
-    
-    // Remove improper H-H bonds
-    for (size_t i = 0; i < num_atoms; ++i) {
-        if (atoms[i] != "H") continue;
-        
-        while (bond_graph[i].size() > 1) {
-            // Find the longest bond to remove
-            float max_distance = 0.0f;
-            size_t max_idx = 0;
-            
-            for (size_t j : bond_graph[i]) {
-                float dist = 0.0f;
-                for (int k = 0; k < 3; ++k) {
-                    dist += dist_vectors[i][j][k] * dist_vectors[i][j][k];
-                }
-                dist = std::sqrt(dist);
-                
-                if (dist > max_distance) {
-                    max_distance = dist;
-                    max_idx = j;
-                }
-            }
-            
-            // Remove bond
-            bond_graph[i].erase(
-                std::find(bond_graph[i].begin(), bond_graph[i].end(), max_idx)
-            );
-            bond_graph[max_idx].erase(
-                std::find(bond_graph[max_idx].begin(), bond_graph[max_idx].end(), i)
-            );
-        }
+    // Remove multi bonds on H
+    for (size_t i=0;i<N;++i) if (atom_vec[i]=="H" && bonds[i].size()>1) bonds[i].resize(1);
+
+    // BFS components
+    std::vector<int> vis(N,0); pybind11::dict out_dict;
+    for (size_t i=0;i<N;++i) if(!vis[i]) {
+        std::vector<size_t> comp; std::queue<size_t> q; q.push(i); vis[i]=1;
+        while(!q.empty()) { auto v=q.front(); q.pop(); comp.push_back(v); for(auto nb: bonds[v]) if(!vis[nb]) {vis[nb]=1; q.push(nb);} }
+        std::unordered_map<std::string,int> counts; for(auto idx: comp) counts[atom_vec[idx]]++;
+        std::vector<std::string> keys; keys.reserve(counts.size()); for(auto &kv: counts) keys.push_back(kv.first);
+        std::sort(keys.begin(), keys.end(), [](const std::string&a,const std::string&b){
+            if (a=="C" && b!="C") return true; if (b=="C" && a!="C") return false;
+            if (a=="H" && b!="H" && b!="C") return true; if (b=="H" && a!="H" && a!="C") return false; return a<b;});
+        std::string formula; for(auto &k: keys){ formula += k; int cnt=counts[k]; if(cnt>1) formula += std::to_string(cnt);}        
+        if (out_dict.contains(formula.c_str())) out_dict[formula.c_str()] = out_dict[formula.c_str()].cast<int>() + 1; else out_dict[formula.c_str()] = 1;
     }
-    
-    // Find connected components (molecules) using BFS
-    std::vector<bool> visited(num_atoms, false);
-    std::vector<std::vector<size_t>> molecules;
-    
-    for (size_t i = 0; i < num_atoms; ++i) {
-        if (!visited[i]) {
-            std::vector<size_t> molecule;
-            std::queue<size_t> queue;
-            queue.push(i);
-            visited[i] = true;
-            
-            while (!queue.empty()) {
-                size_t current = queue.front();
-                queue.pop();
-                molecule.push_back(current);
-                
-                for (size_t neighbor : bond_graph[current]) {
-                    if (!visited[neighbor]) {
-                        queue.push(neighbor);
-                        visited[neighbor] = true;
-                    }
-                }
-            }
-            molecules.push_back(molecule);
-        }
-    }
-    
-    // Create molecular formulas and count them
-    std::unordered_map<std::string, int> molecular_formulas;
-    
-    for (const auto& molecule : molecules) {
-        std::unordered_map<std::string, int> atom_counts;
-        
-        for (size_t atom_idx : molecule) {
-            atom_counts[atoms[atom_idx]]++;
-        }
-        
-        // Generate formula string (C first, H second, then alphabetically)
-        std::string formula;
-        std::vector<std::string> sorted_atoms;
-        
-        for (const auto& [atom_type, count] : atom_counts) {
-            sorted_atoms.push_back(atom_type);
-        }
-        
-        std::sort(sorted_atoms.begin(), sorted_atoms.end(), [](const std::string& a, const std::string& b) {
-            if (a == "C") return true;
-            if (b == "C") return false;
-            if (a == "H") return true;
-            if (b == "H") return false;
-            return a < b;
-        });
-        
-        for (const std::string& atom_type : sorted_atoms) {
-            formula += atom_type;
-            if (atom_counts[atom_type] > 1) {
-                formula += std::to_string(atom_counts[atom_type]);
-            }
-        }
-        
-        molecular_formulas[formula]++;
-    }
-    
-    return molecular_formulas;
+    return out_dict;
 }
 
 } // namespace pbctools
