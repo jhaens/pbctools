@@ -12,11 +12,7 @@ A lightweight Python package for periodic boundary condition calculations, neigh
 
 ## Installation
 
-```bash
-pip install pbctools
-```
-
-Or install from source:
+Install from source:
 ```bash
 git clone https://github.com/jhaens/pbctools.git
 cd pbctools

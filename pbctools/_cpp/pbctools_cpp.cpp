@@ -1,6 +1,5 @@
 // pbctools_cpp.cpp - Main C++ implementation for pbctools
 
-#include "pbctools_cpp.h"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -10,6 +9,7 @@
 #include <unordered_set>
 #include <optional>
 #include <pybind11/pybind11.h>
+#include "pbctools_cpp.h"
 
 #ifdef WITH_OPENMP
 #include <omp.h>
