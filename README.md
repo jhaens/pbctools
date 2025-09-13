@@ -28,44 +28,34 @@ from ase.io import read, write
 
 # OPTION 1
 # Load single trajectory frames data
-data1 = read('coord1.xyz')
-data1.set_cell(np.loadtxt('pbc1.txt'))
-data2 = read('coord2.xyz')
-data2.set_cell(np.loadtxt('pbc2.txt'))
+coords1 = read('coord1.xyz')
+coords1.set_cell(np.loadtxt('pbc1.txt'))
+coords2 = read('coord2.xyz')
+coords2.set_cell(np.loadtxt('pbc2.txt'))
 
-# Convert ASE atoms to NumPy arrays
-coords1 = data1.get_positions()
-atoms1 = np.array(data1.get_chemical_symbols())
-coords2 = data2.get_positions()
-atoms2 = np.array(data2.get_chemical_symbols())
-pbc = data1.get_cell()
+# Calculate distance vectors between all atom pairs
+distances = pbc_dist(coords1, coords2)
+print(f"Distance shape: {distances.shape}")  # (50, 30, 3)
 
+# Find nearest neighbors
+indices, distances = next_neighbor(coords1, coords2)
+print(f"Nearest indices: {indices.shape}")   # (50,)
+print(f"Minimum distances: {distances.shape}")  # (50,)
+
+# Analyze molecular composition (single frame)
+molecules = molecule_recognition(coords1)
+print(f"Found molecules: {molecules}")  # {'H2O': 100}
 
 # OPTION 2
 # Load trajectory data
-data1 = read('traj1.xyz', index=':')
-data2 = read('traj2.xyz', index=':')
+coords1 = read('traj1.xyz', index=':')
+coords2 = read('traj2.xyz', index=':')
 pbc = np.loadtxt('pbc.txt')
+for frame in coords1:
+	frame.set_cell(np.array(pbc))
 
-# Convert ASE trajectory to NumPy arrays
-coords1 = np.array([frame.get_positions() for frame in data1])
-atoms1 = np.array(data1[0].get_chemical_symbols())
-coords2 = np.array([frame.get_positions() for frame in data2])
-atoms2 = np.array(data2[0].get_chemical_symbols())
+# ...
 
-# Calculate distance vectors between all atom pairs
-distances = pbc_dist(coords1, coords2, pbc)
-print(f"Distance shape: {distances.shape}")  # (1000, 50, 30, 3)
-
-# Find nearest neighbors
-indices, distances = next_neighbor(coords1, coords2, pbc)
-print(f"Nearest indices: {indices.shape}")   # (1000, 50)
-print(f"Minimum distances: {distances.shape}")  # (1000, 50)
-
-# Analyze molecular composition (single frame)
-atoms = ['O', 'H', 'H'] * 100  # 100 water molecules
-molecules = molecule_recognition(coords1[0], atoms1, pbc)
-print(f"Found molecules: {molecules}")  # {'H2O': 100}
 ```
 
 ## API Reference

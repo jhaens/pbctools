@@ -199,8 +199,26 @@ pybind11::dict molecule_recognition(
             if (0.03f < d && d < 0.6f*sumr && d < cutoff) { bonds[i].push_back(j); bonds[j].push_back(i); }
         }
     }
-    // Remove multi bonds on H
-    for (size_t i=0;i<N;++i) if (atom_vec[i]=="H" && bonds[i].size()>1) bonds[i].resize(1);
+    // Remove improper H-H bonds: if H has >1 bonds, iteratively remove the longest until one remains
+    for (size_t i=0;i<N;++i) {
+        if (atom_vec[i] != "H") continue;
+        while (bonds[i].size() > 1) {
+            // Find the longest bond from H i
+            float max_d = -1.0f; size_t max_idx = 0; size_t max_pos = 0;
+            for (size_t pos=0; pos<bonds[i].size(); ++pos) {
+                size_t j = bonds[i][pos];
+                // distance from dv at indices (i,j)
+                const float* v = vecs + ((i*N + j)*3);
+                float d = std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+                if (d > max_d) { max_d = d; max_idx = j; max_pos = pos; }
+            }
+            // Remove bond i - max_idx (both directions)
+            bonds[i].erase(bonds[i].begin() + max_pos);
+            auto &bj = bonds[max_idx];
+            auto it = std::find(bj.begin(), bj.end(), i);
+            if (it != bj.end()) bj.erase(it);
+        }
+    }
 
     // BFS components
     std::vector<int> vis(N,0); pybind11::dict out_dict;
@@ -209,9 +227,14 @@ pybind11::dict molecule_recognition(
         while(!q.empty()) { auto v=q.front(); q.pop(); comp.push_back(v); for(auto nb: bonds[v]) if(!vis[nb]) {vis[nb]=1; q.push(nb);} }
         std::unordered_map<std::string,int> counts; for(auto idx: comp) counts[atom_vec[idx]]++;
         std::vector<std::string> keys; keys.reserve(counts.size()); for(auto &kv: counts) keys.push_back(kv.first);
-        std::sort(keys.begin(), keys.end(), [](const std::string&a,const std::string&b){
-            if (a=="C" && b!="C") return true; if (b=="C" && a!="C") return false;
-            if (a=="H" && b!="H" && b!="C") return true; if (b=="H" && a!="H" && a!="C") return false; return a<b;});
+        // Exact ordering: C first, H second, then alphabetical
+        std::sort(keys.begin(), keys.end(), [](const std::string& a, const std::string& b){
+            if (a == "C") return true;
+            if (b == "C") return false;
+            if (a == "H") return true;
+            if (b == "H") return false;
+            return a < b;
+        });
         std::string formula; for(auto &k: keys){ formula += k; int cnt=counts[k]; if(cnt>1) formula += std::to_string(cnt);}        
         if (out_dict.contains(formula.c_str())) out_dict[formula.c_str()] = out_dict[formula.c_str()].cast<int>() + 1; else out_dict[formula.c_str()] = 1;
     }
