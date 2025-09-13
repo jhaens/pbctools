@@ -33,18 +33,17 @@ coords1.set_cell(np.loadtxt('pbc1.txt'))
 coords2 = read('coord2.xyz')
 coords2.set_cell(np.loadtxt('pbc2.txt'))
 
-# Calculate distance vectors between all atom pairs
+# Calculate distance vectors between all atom pairs (ASE objects auto-extract PBC)
 distances = pbc_dist(coords1, coords2)
-print(f"Distance shape: {distances.shape}")  # (50, 30, 3)
+print(f"Distance shape: {distances.shape}")  # (1, n_atoms1, n_atoms2, 3) for single-frame inputs
 
 # Find nearest neighbors
-indices, distances = next_neighbor(coords1, coords2)
-print(f"Nearest indices: {indices.shape}")   # (50,)
-print(f"Minimum distances: {distances.shape}")  # (50,)
+indices, nn_dists = next_neighbor(coords1, coords2)
+print(indices.shape, nn_dists.shape)  # (1, n_atoms1), (1, n_atoms1) for single-frame inputs
 
 # Analyze molecular composition (single frame)
 molecules = molecule_recognition(coords1)
-print(f"Found molecules: {molecules}")  # {'H2O': 100}
+print(f"Found molecules: {molecules}")  # e.g., {'H2O': 100}
 
 # OPTION 2
 # Load trajectory data
@@ -60,39 +59,50 @@ for frame in coords1:
 
 ## API Reference
 
-### pbc_dist(coord1, coord2, pbc)
+### pbc_dist(coord1, coord2=None, pbc=None)
 Calculate periodic boundary condition distance vectors.
 
-**Parameters:**
-- `coord1`: np.ndarray, shape (n_frames, n_atoms1, 3)
-- `coord2`: np.ndarray, shape (n_frames, n_atoms2, 3) 
-- `pbc`: np.ndarray, shape (3, 3)
+Supports flexible inputs:
+- ASE Atoms (single frame) or list of Atoms (trajectory) — PBC auto-extracted
+- NumPy arrays
 
-**Returns:**
-- `distance vector`: np.ndarray, shape (n_frames, n_atoms1, n_atoms2, 3)
+Parameters:
+- coord1: ASE Atoms | list[Atoms] | np.ndarray
+	- If ndarray: shape (n_frames, n_atoms1, 3) or (n_atoms1, 3) for single-frame
+- coord2: ASE Atoms | list[Atoms] | np.ndarray | None (default: coord1)
+	- If ndarray: shape (n_frames, n_atoms2, 3) or (n_atoms2, 3)
+- pbc: np.ndarray | None
+	- Required for ndarray inputs; shape (3, 3). Ignored when using ASE objects (read from Atoms).
 
-### next_neighbor(coord1, coord2, pbc)
-Find nearest neighbors between two atom sets. If you are interested in the nearest neighbor within the same set, pass the same coordinates for both parameters `coord1` and `coord2`.
+Returns:
+- np.ndarray with shape (n_frames, n_atoms1, n_atoms2, 3)
+	- For single-frame inputs, n_frames = 1
 
-**Parameters:**
-- `coord1`: np.ndarray, shape (n_frames, n_atoms1, 3)
-- `coord2`: np.ndarray, shape (n_frames, n_atoms2, 3)
-- `pbc`: np.ndarray, shape (3, 3) - PBC matrix
+Notes:
+- To compute within-set distances, pass the same object/array for coord1 and coord2.
 
-**Returns:**
-- `indices`: np.ndarray, shape (n_frames, n_atoms1) - Nearest atom indices
-- `distances`: np.ndarray, shape (n_frames, n_atoms1) - Minimum distances
+### next_neighbor(coord1, coord2=None, pbc=None)
+Find nearest neighbors between two atom sets (PBC-aware).
 
-### molecule_recognition(coords, atoms, pbc)
-Identify molecular species in a single frame.
+Parameters:
+- coord1: ASE Atoms | list[Atoms] | np.ndarray (…, 3)
+- coord2: ASE Atoms | list[Atoms] | np.ndarray (…, 3) | None (default: coord1)
+- pbc: np.ndarray (3, 3) | None
 
-**Parameters:**
-- `coords`: np.ndarray, shape (n_atoms, 3) - Single frame coordinates
-- `atoms`: list[str], length n_atoms - Atomic symbols
-- `pbc`: np.ndarray, shape (3, 3) - PBC matrix
+Returns:
+- indices: np.ndarray of int with shape (n_frames, n_atoms1)
+- distances: np.ndarray of float32 with shape (n_frames, n_atoms1)
 
-**Returns:**
-- `molecule_dict`: dict[str, int] - Molecular species and their counts 
+### molecule_recognition(coords, atoms=None, pbc=None)
+Identify molecular species in a single frame via bond detection.
+
+Parameters:
+- coords: ASE Atoms | np.ndarray, shape (n_atoms, 3)
+- atoms: list[str] | np.ndarray[str] | None — required for ndarray input; ignored for ASE Atoms
+- pbc: np.ndarray (3, 3) | None — required for ndarray input; ignored for ASE Atoms
+
+Returns:
+- dict[str, int] — molecular formulas and counts
 
 ## Performance
 
