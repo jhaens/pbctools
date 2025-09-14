@@ -13,6 +13,7 @@ ext_modules = [
             "pbctools/_cpp/bindings.cpp",
         ],
         include_dirs=[
+            "pbctools/_cpp",
             # Path to pybind11 headers
             pybind11.get_include(),
             # Path to numpy headers

@@ -19,6 +19,11 @@ cd pbctools
 pip install .
 ```
 
+Installation via pip (PyPI):
+```bash
+pip install pbctools
+```
+
 ## Quick Start
 
 ```python
