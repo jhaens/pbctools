@@ -168,10 +168,11 @@ float get_vdw_radius(const std::string& element) {
 }
 
 
-pybind11::dict molecule_recognition(
+pybind11::object molecule_recognition(
     pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> coords,
     pybind11::list atoms,
-    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> pbc) {
+    pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> pbc,
+    bool return_indices) {
     auto bc = coords.request();
     if (bc.ndim != 2 || bc.shape[1] != 3) throw std::runtime_error("coords must be (N,3)");
     size_t N = bc.shape[0];
@@ -221,10 +222,11 @@ pybind11::dict molecule_recognition(
     }
 
     // BFS components
-    std::vector<int> vis(N,0); pybind11::dict out_dict;
+    std::vector<int> vis(N,0); pybind11::dict out_dict; pybind11::list molecule_list;
     for (size_t i=0;i<N;++i) if(!vis[i]) {
         std::vector<size_t> comp; std::queue<size_t> q; q.push(i); vis[i]=1;
         while(!q.empty()) { auto v=q.front(); q.pop(); comp.push_back(v); for(auto nb: bonds[v]) if(!vis[nb]) {vis[nb]=1; q.push(nb);} }
+        std::sort(comp.begin(), comp.end());
         std::unordered_map<std::string,int> counts; for(auto idx: comp) counts[atom_vec[idx]]++;
         std::vector<std::string> keys; keys.reserve(counts.size()); for(auto &kv: counts) keys.push_back(kv.first);
         // Exact ordering: C first, H second, then alphabetical
@@ -235,9 +237,18 @@ pybind11::dict molecule_recognition(
             if (b == "H") return false;
             return a < b;
         });
-        std::string formula; for(auto &k: keys){ formula += k; int cnt=counts[k]; if(cnt>1) formula += std::to_string(cnt);}        
+        std::string formula; for(auto &k: keys){ formula += k; int cnt=counts[k]; if(cnt>1) formula += std::to_string(cnt);}
         if (out_dict.contains(formula.c_str())) out_dict[formula.c_str()] = out_dict[formula.c_str()].cast<int>() + 1; else out_dict[formula.c_str()] = 1;
+
+        if (return_indices) {
+            pybind11::dict mol_entry;
+            mol_entry["formula"] = formula;
+            pybind11::list idx_list; for (auto idx: comp) idx_list.append((int)idx);
+            mol_entry["indices"] = idx_list;
+            molecule_list.append(mol_entry);
+        }
     }
+    if (return_indices) return pybind11::make_tuple(out_dict, molecule_list);
     return out_dict;
 }
 

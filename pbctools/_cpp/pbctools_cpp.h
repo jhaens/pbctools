@@ -29,10 +29,15 @@ std::pair<py::array_t<int>, py::array_t<float>> next_neighbor(
     py::array_t<float, py::array::c_style | py::array::forcecast> coord2,
     py::array_t<float, py::array::c_style | py::array::forcecast> pbc);
 
-py::dict molecule_recognition(
+// Returns a dict of formula->count when return_indices is false.
+// When return_indices is true, returns a tuple (formula_counts, molecules), where molecules
+// is a list of dicts {'formula': str, 'indices': List[int]} with the 0-based atom indices
+// belonging to each detected molecule.
+py::object molecule_recognition(
     py::array_t<float, py::array::c_style | py::array::forcecast> coords,
     py::list atoms,
-    py::array_t<float, py::array::c_style | py::array::forcecast> pbc);
+    py::array_t<float, py::array::c_style | py::array::forcecast> pbc,
+    bool return_indices);
 
 // Utility functions
 bool is_orthogonal(const PBCMatrix& pbc);

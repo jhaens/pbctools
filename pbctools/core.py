@@ -117,10 +117,10 @@ def next_neighbor(coord1, coord2=None, pbc=None):
     return np.asarray(indices, dtype=np.int32), np.asarray(distances, dtype=np.float32)
 
 
-def molecule_recognition(coords, atoms = None, pbc = None):
+def molecule_recognition(coords, atoms = None, pbc = None, return_indices = False):
     """
     Identify molecular species in a single frame using bond detection.
-    
+
     Parameters
     ----------
     coords : ASE Atoms or np.ndarray
@@ -129,16 +129,26 @@ def molecule_recognition(coords, atoms = None, pbc = None):
         Atomic symbols, shape (n_atoms,). Required if coords_input is numpy array.
     pbc : np.ndarray, optional
         Periodic boundary condition matrix, shape (3, 3). Required if coords_input is numpy array.
+    return_indices : bool, optional
+        If True, also return the 0-based atom indices belonging to each detected molecule.
 
     Returns
     -------
     Dict[str, int]
-        Dictionary with molecular formulas as keys and counts as values
-        
+        If return_indices is False (default): dictionary with molecular formulas as keys and
+        counts as values.
+    Tuple[Dict[str, int], List[Dict[str, Union[str, List[int]]]]]
+        If return_indices is True: (formula_counts, molecules), where molecules is a list with
+        one entry per detected molecule (in the order they were found), each entry a dict
+        {'formula': str, 'indices': List[int]} giving the 0-based atom indices that make up
+        that molecule. This lets you look up, for any molecule instance, exactly which atoms
+        belong to it (e.g. `coords[molecules[i]['indices']]`), even when several molecules
+        share the same formula.
+
     """
     if _is_ase_atoms(coords):
         coords, atoms, pbc = _prepare_coords_and_pbc(coords)
-        pbc = pbc if pbc is not None else pbc 
+        pbc = pbc if pbc is not None else pbc
 
     if coords.ndim != 2 or coords.shape[-1] != 3:
         raise ValueError(f"coords must have shape (n_atoms, 3), got {coords.shape}")
@@ -146,7 +156,10 @@ def molecule_recognition(coords, atoms = None, pbc = None):
         raise ValueError(f"Number of atoms ({len(atoms)}) must match coordinates ({coords.shape[0]})")
     if pbc.shape != (3, 3):
         raise ValueError(f"pbc must have shape (3, 3), got {pbc.shape}")
-    
+
     # Call C++ backend
-    result = pbctools_cpp.molecule_recognition(coords, list(atoms), pbc)
+    result = pbctools_cpp.molecule_recognition(coords, list(atoms), pbc, return_indices)
+    if return_indices:
+        counts, molecules = result
+        return dict(counts), molecules
     return dict(result)
